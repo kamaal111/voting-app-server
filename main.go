@@ -14,6 +14,20 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
+func main() {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	clientOptions := options.Client().ApplyURI(config.databaseURL)
+	client, _ = mongo.Connect(ctx, clientOptions)
+	router := mux.NewRouter().StrictSlash(true)
+
+	router.HandleFunc("/sessions", getAllSessions).Methods("GET")
+	router.HandleFunc("/sessions", createSession).Methods("POST")
+
+	fmt.Printf("Listening on %s\n", config.port)
+	http.ListenAndServe(config.port, router)
+}
+
 // DatabaseCollections defines the database collections structure
 type DatabaseCollections struct {
 	sessions string
@@ -38,8 +52,9 @@ var config = Config{
 
 // An Session represents a voting session
 type Session struct {
-	ID   primitive.ObjectID `json:"_id,omitempty" bson:"_id,omitempty"`
-	Name string             `json:"name,omitempty" bson:"name,omitempty"`
+	ID         primitive.ObjectID `json:"_id,omitempty" bson:"_id,omitempty"`
+	Name       string             `json:"name,omitempty" bson:"name,omitempty"`
+	Candidates []string           `json:"candidates,omitempty" bson:"candidates,omitempty"`
 }
 
 var client *mongo.Client
@@ -53,6 +68,7 @@ func createSession(response http.ResponseWriter, request *http.Request) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	result, _ := collection.InsertOne(ctx, session)
+	response.WriteHeader(http.StatusOK)
 	json.NewEncoder(response).Encode(result)
 }
 
@@ -60,48 +76,26 @@ func getAllSessions(response http.ResponseWriter, request *http.Request) {
 	fmt.Printf("GET %s/sessions\n", config.port)
 	response.Header().Add("content-type", "application/json")
 	var allSessions []Session
-
 	collection := client.Database(config.databaseName).Collection(config.databaseCollections.sessions)
-
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-
 	defer cancel()
-
 	cursor, err := collection.Find(ctx, bson.M{})
-
 	if err != nil {
 		response.WriteHeader(http.StatusInternalServerError)
 		response.Write([]byte(`{"message": "` + err.Error() + `"}`))
 		return
 	}
-
 	defer cursor.Close(ctx)
-
 	for cursor.Next(ctx) {
 		var session Session
 		cursor.Decode(&session)
 		allSessions = append(allSessions, session)
 	}
-
 	if err := cursor.Err(); err != nil {
 		response.WriteHeader(http.StatusInternalServerError)
 		response.Write([]byte(`{"message": "` + err.Error() + `"}`))
 		return
 	}
-
+	response.WriteHeader(http.StatusOK)
 	json.NewEncoder(response).Encode(allSessions)
-}
-
-func main() {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	clientOptions := options.Client().ApplyURI(config.databaseURL)
-	client, _ = mongo.Connect(ctx, clientOptions)
-	router := mux.NewRouter()
-
-	router.HandleFunc("/sessions", getAllSessions).Methods("GET")
-	router.HandleFunc("/sessions", createSession).Methods("POST")
-
-	fmt.Printf("Listening on %s\n", config.port)
-	http.ListenAndServe(config.port, router)
 }
