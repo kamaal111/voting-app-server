@@ -97,6 +97,11 @@ func getAllSessions(response http.ResponseWriter, request *http.Request) {
 		cursor.Decode(&session)
 		allSessions = append(allSessions, session)
 	}
+	if len(allSessions) == 0 {
+		response.WriteHeader(http.StatusNotFound)
+		response.Write([]byte(`{"message": "Not Found"}`))
+		return
+	}
 	if err := cursor.Err(); err != nil {
 		response.WriteHeader(http.StatusInternalServerError)
 		response.Write([]byte(`{"message": "` + err.Error() + `"}`))
