@@ -4,29 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"time"
 
 	"github.com/gorilla/mux"
+	"github.com/rs/cors"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
-
-func main() {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	clientOptions := options.Client().ApplyURI(config.databaseURL)
-	client, _ = mongo.Connect(ctx, clientOptions)
-	router := mux.NewRouter().StrictSlash(true)
-
-	router.HandleFunc("/sessions", getAllSessions).Methods("GET")
-	router.HandleFunc("/sessions", createSession).Methods("POST")
-
-	fmt.Printf("Listening on %s\n", config.port)
-	http.ListenAndServe(config.port, router)
-}
 
 // DatabaseCollections defines the database collections structure
 type DatabaseCollections struct {
@@ -109,4 +97,44 @@ func getAllSessions(response http.ResponseWriter, request *http.Request) {
 	}
 	response.WriteHeader(http.StatusOK)
 	json.NewEncoder(response).Encode(allSessions)
+}
+
+func getOneSession(response http.ResponseWriter, request *http.Request) {
+	response.Header().Add("content-type", "application/json")
+	var session Session
+	params := mux.Vars(request)
+	id, _ := primitive.ObjectIDFromHex(params["id"])
+	fmt.Printf("GET %s/sessions/%s\n", config.port, params["id"])
+	collection := client.Database(config.databaseName).Collection(config.databaseCollections.sessions)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	err := collection.FindOne(ctx, Session{ID: id}).Decode(&session)
+	if err != nil {
+		response.WriteHeader(http.StatusInternalServerError)
+		response.Write([]byte(`{"message": "` + err.Error() + `"}`))
+		return
+	}
+	json.NewEncoder(response).Encode(session)
+}
+
+func main() {
+	c := cors.New(cors.Options{
+		AllowedOrigins:   []string{"http://localhost:3000"},
+		AllowCredentials: true,
+		Debug:            true,
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	clientOptions := options.Client().ApplyURI(config.databaseURL)
+	client, _ = mongo.Connect(ctx, clientOptions)
+	router := mux.NewRouter().StrictSlash(true)
+
+	router.HandleFunc("/sessions", getAllSessions).Methods("GET")
+	router.HandleFunc("/sessions", createSession).Methods("POST")
+	router.HandleFunc("/sessions/{id}", getOneSession).Methods("GET")
+
+	fmt.Printf("Listening on %s\n", config.port)
+	handler := c.Handler(router)
+	log.Fatal(http.ListenAndServe(config.port, handler))
 }
